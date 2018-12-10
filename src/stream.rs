@@ -44,7 +44,7 @@ bitflags! {
 /// See the module-level documentation for more information.
 #[derive(Debug)]
 pub struct Stream {
-    inner: CUstream,
+    pub inner: CUstream,
 }
 impl Stream {
     /// Create a new stream with the given flags and optional priority.

@@ -1,9 +1,11 @@
 use crate::error::{CudaResult, DropResult, ToResult};
+use crate::memory::device::AsyncCopyDestination;
 use crate::memory::device::CopyDestination;
 use crate::memory::malloc::{cuda_free, cuda_malloc};
 use crate::memory::DeviceCopy;
 use crate::memory::DevicePointer;
 use cuda_sys::cuda;
+use cuda_sys::cuda::CUstream;
 use std::fmt::{self, Pointer};
 use std::mem;
 
@@ -307,10 +309,69 @@ impl<T: DeviceCopy> CopyDestination<DeviceBox<T>> for DeviceBox<T> {
         Ok(())
     }
 }
+impl<T: DeviceCopy> AsyncCopyDestination<T> for DeviceBox<T> {
+    unsafe fn async_copy_from(&mut self, val: &T, stream: CUstream) -> CudaResult<()> {
+        let size = mem::size_of::<T>();
+        if size != 0 {
+            cuda::cuMemcpyHtoDAsync_v2(
+                self.ptr.as_raw_mut() as u64,
+                val as *const T as *const c_void,
+                size,
+                stream,
+            )
+            .to_result()?
+        }
+        Ok(())
+    }
+
+    unsafe fn async_copy_to(&self, val: &mut T, stream: CUstream) -> CudaResult<()> {
+        let size = mem::size_of::<T>();
+        if size != 0 {
+            cuda::cuMemcpyDtoHAsync_v2(
+                val as *const T as *mut c_void,
+                self.ptr.as_raw() as u64,
+                size,
+                stream,
+            )
+            .to_result()?
+        }
+        Ok(())
+    }
+}
+impl<T: DeviceCopy> AsyncCopyDestination<DeviceBox<T>> for DeviceBox<T> {
+    unsafe fn async_copy_from(&mut self, val: &DeviceBox<T>, stream: CUstream) -> CudaResult<()> {
+        let size = mem::size_of::<T>();
+        if size != 0 {
+            cuda::cuMemcpyDtoDAsync_v2(
+                self.ptr.as_raw_mut() as u64,
+                val.ptr.as_raw() as u64,
+                size,
+                stream,
+            )
+            .to_result()?
+        }
+        Ok(())
+    }
+
+    unsafe fn async_copy_to(&self, val: &mut DeviceBox<T>, stream: CUstream) -> CudaResult<()> {
+        let size = mem::size_of::<T>();
+        if size != 0 {
+            cuda::cuMemcpyDtoDAsync_v2(
+                val.ptr.as_raw_mut() as u64,
+                self.ptr.as_raw() as u64,
+                size,
+                stream,
+            )
+            .to_result()?
+        }
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod test_device_box {
     use super::*;
+    use crate::stream::{Stream, StreamFlags};
 
     #[derive(Clone, Debug)]
     struct ZeroSizedType;
@@ -361,12 +422,72 @@ mod test_device_box {
     }
 
     #[test]
+    fn test_async_copy_host_to_device() {
+        let _context = crate::quick_init().unwrap();
+        let stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        let y = 5u64;
+        let mut x = DeviceBox::new(&0u64).unwrap();
+        unsafe {
+            x.async_copy_from(&y, stream.inner).unwrap();
+            let mut z = 10u64;
+            x.async_copy_to(&mut z, stream.inner).unwrap();
+            stream.synchronize().unwrap();
+            assert_eq!(y, z);
+        }
+    }
+
+    #[test]
     fn test_copy_device_to_host() {
         let _context = crate::quick_init().unwrap();
         let x = DeviceBox::new(&5u64).unwrap();
         let mut y = 0u64;
         x.copy_to(&mut y).unwrap();
         assert_eq!(5, y);
+    }
+
+    #[test]
+    fn test_async_copy_device_to_host_stack() {
+        let _context = crate::quick_init().unwrap();
+        let stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        let x = DeviceBox::new(&5u64).unwrap();
+        let mut y = 0u64;
+        unsafe {
+            x.async_copy_to(&mut y, stream.inner).unwrap();
+            stream.synchronize().unwrap();
+            assert_eq!(5, y);
+        }
+    }
+
+    #[test]
+    fn test_async_copy_device_to_host_heap() {
+        let _context = crate::quick_init().unwrap();
+        let stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        let x = DeviceBox::new(&5u64).unwrap();
+        let mut y = 0u64;
+        let mut ptr = &mut y;
+        let mut y2 = Box::new(0u64);
+        ptr = &mut y2;
+        unsafe {
+            x.async_copy_to(ptr, stream.inner).unwrap();
+            stream.synchronize().unwrap();
+            assert_eq!(5, *ptr);
+        }
+    }
+
+    #[test]
+    fn test_async_copy_device_to_host_pinned() {
+        let _context = crate::quick_init().unwrap();
+        let stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        let x = DeviceBox::new(&5u64).unwrap();
+        let mut y = 0u64;
+        let ptr = &mut y;
+        unsafe {
+            let _result = cuda::cuMemHostAlloc(&mut (ptr as *mut u64 as *mut c_void), 8, 0);
+            *ptr = 0;
+            x.async_copy_to(ptr, stream.inner).unwrap();
+            stream.synchronize().unwrap();
+            assert_eq!(5, *ptr);
+        }
     }
 
     #[test]
@@ -381,5 +502,22 @@ mod test_device_box {
         let mut h = 0u64;
         z.copy_to(&mut h).unwrap();
         assert_eq!(5, h);
+    }
+
+    #[test]
+    fn test_async_copy_device_to_device() {
+        let _context = crate::quick_init().unwrap();
+        let stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        let x = DeviceBox::new(&5u64).unwrap();
+        let mut y = DeviceBox::new(&0u64).unwrap();
+        let mut z = DeviceBox::new(&0u64).unwrap();
+        unsafe {
+            x.async_copy_to(&mut y, stream.inner).unwrap();
+            z.async_copy_from(&y, stream.inner).unwrap();
+            let mut h = 0u64;
+            z.async_copy_to(&mut h, stream.inner).unwrap();
+            stream.synchronize().unwrap();
+            assert_eq!(5, h);
+        }
     }
 }
