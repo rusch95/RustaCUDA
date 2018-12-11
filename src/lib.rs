@@ -169,6 +169,7 @@ pub mod memory;
 pub mod module;
 pub mod prelude;
 pub mod stream;
+pub mod async_futures;
 
 mod derive_compile_fail;
 
