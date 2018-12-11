@@ -65,13 +65,11 @@
 //! responsible for reconstructing the `UnifiedBuffer` using `from_raw_parts()` and dropping it to
 //! ensure that the memory allocation is safely cleaned up.
 
-mod futures;
 mod device;
 mod locked;
 mod malloc;
 mod unified;
 
-pub use self::futures::*;
 pub use self::device::*;
 pub use self::locked::*;
 pub use self::malloc::*;

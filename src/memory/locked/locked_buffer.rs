@@ -1,6 +1,6 @@
-use super::DeviceCopy;
 use crate::error::*;
 use crate::memory::malloc::{cuda_free_locked, cuda_malloc_locked};
+use crate::memory::DeviceCopy;
 use std::mem;
 use std::ops;
 use std::ptr;
@@ -333,3 +333,4 @@ mod test {
         assert_eq!(CudaError::InvalidMemoryAllocation, err);
     }
 }
+
