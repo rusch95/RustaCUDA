@@ -12,6 +12,7 @@
 
 use crate::error::{CudaResult, DropResult, ToResult};
 use crate::function::{BlockSize, Function, GridSize};
+use crate::memory::{Executor, Promise};
 use cuda_sys::cuda::{self, cudaError_t, CUstream};
 use std::ffi::c_void;
 use std::mem;
@@ -125,6 +126,13 @@ impl Stream {
             cuda::cuStreamGetPriority(self.inner, &mut priority as *mut i32).to_result()?;
             Ok(priority)
         }
+    }
+
+    pub fn submit<'a, F>(&self, f: F) -> Promise<'a, F>
+    where
+        F: FnOnce(&Executor<'a>),
+    {
+        Promise::new(self.inner, f)
     }
 
     /// Add a callback to a stream.

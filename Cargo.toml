@@ -16,6 +16,7 @@ travis-ci = { repository = "bheisler/RustaCUDA" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
+futures = "0.1"
 cuda-sys = "0.2"
 bitflags = "1.0"
 rustacuda_derive = { version = "0.1.0", path = "rustacuda_derive" }

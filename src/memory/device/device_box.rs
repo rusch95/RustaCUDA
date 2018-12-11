@@ -328,7 +328,7 @@ impl<T: DeviceCopy> AsyncCopyDestination<T> for DeviceBox<T> {
         let size = mem::size_of::<T>();
         if size != 0 {
             cuda::cuMemcpyDtoHAsync_v2(
-                val as *const T as *mut c_void,
+                val as *mut T as *mut c_void,
                 self.ptr.as_raw() as u64,
                 size,
                 stream,
@@ -454,6 +454,7 @@ mod test_device_box {
         unsafe {
             x.async_copy_to(&mut y, stream.inner).unwrap();
             stream.synchronize().unwrap();
+            ::std::thread::sleep(::std::time::Duration::from_millis(100));
             assert_eq!(5, y);
         }
     }
